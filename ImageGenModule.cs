@@ -16,8 +16,8 @@ using Microsoft.Extensions.Logging;
 namespace Alife.Plugin.ImageGen;
 
 [Module(
-    "AI \u56fe\u7247\u751f\u6210",
-    "AI \u56fe\u7247\u751f\u6210\u529f\u80fd\uff0c\u652f\u6301\u81ea\u5b9a\u4e49\u63a5\u53e3\u5730\u5740\u3001API Key\u3001\u6a21\u578b\u548c\u5c3a\u5bf8\u3002\u517c\u5bb9 OpenAI \u683c\u5f0f\u63a5\u53e3\u53ca Stable Diffusion API\u3002"
+    "AI 图片生成",
+    "AI 图片生成功能，支持自定义接口地址、API Key、模型和尺寸。兼容 OpenAI 格式接口及 Stable Diffusion API。"
 )]
 public class ImageGenModule(
     XmlFunctionCaller functionService,
@@ -33,13 +33,13 @@ public class ImageGenModule(
     public ImageGenConfig? Configuration { get; set; }
 
     [XmlFunction(FunctionMode.OneShot)]
-    [Description("\u914d\u7f6e\u56fe\u7247\u751f\u6210\u53c2\u6570 - \u8bbe\u7f6e API \u63a5\u53e3\u5730\u5740\u3001Key\u3001\u6a21\u578b\u548c\u9ed8\u8ba4\u5c3a\u5bf8")]
+    [Description("配置图片生成参数 - 设置 API 接口地址、Key、模型和默认尺寸")]
     public Task SetConfig(
-        [Description("API \u63a5\u53e3\u5730\u5740\uff0c\u5982 https://api.openai.com/v1/images/generations")] string? endpoint = null,
+        [Description("API 接口地址，如 https://api.openai.com/v1/images/generations")] string? endpoint = null,
         [Description("API Key")] string? apiKey = null,
-        [Description("\u6a21\u578b\u540d\u79f0\uff0c\u5982 dall-e-3\u3001stable-diffusion-xl-1024-v1-0")] string? model = null,
-        [Description("\u9ed8\u8ba4\u5bbd\u5ea6\uff0c\u5982 1024")] int? width = null,
-        [Description("\u9ed8\u8ba4\u9ad8\u5ea6\uff0c\u5982 1024")] int? height = null
+        [Description("模型名称，如 dall-e-3、stable-diffusion-xl-1024-v1-0")] string? model = null,
+        [Description("默认宽度，如 1024")] int? width = null,
+        [Description("默认高度，如 1024")] int? height = null
     )
     {
         Configuration ??= new ImageGenConfig();
@@ -49,29 +49,33 @@ public class ImageGenModule(
         if (width.HasValue) Configuration.DefaultWidth = width.Value;
         if (height.HasValue) Configuration.DefaultHeight = height.Value;
 
-        var keyLabel = string.IsNullOrEmpty(Configuration.ApiKey) ? "\u672a\u8bbe\u7f6e" : "\u5df2\u8bbe\u7f6e";
-        Poke($"\u914d\u7f6e\u5df2\u66f4\u65b0\n  \u63a5\u53e3\uff1a{Configuration.ApiEndpoint}\n  Key\uff1a{keyLabel}\n  \u6a21\u578b\uff1a{Configuration.Model}\n  \u5c3a\u5bf8\uff1a{Configuration.DefaultWidth}x{Configuration.DefaultHeight}");
+        var msg = $"配置已更新
+  接口：{Configuration.ApiEndpoint}
+  Key：{(string.IsNullOrEmpty(Configuration.ApiKey) ? "未设置" : "已设置")}
+  模型：{Configuration.Model}
+  尺寸：{Configuration.DefaultWidth}x{Configuration.DefaultHeight}";
+        Poke(msg);
         return Task.CompletedTask;
     }
 
     [XmlFunction(FunctionMode.OneShot)]
-    [Description("\u751f\u6210\u56fe\u7247 - \u6839\u636e\u63d0\u793a\u8bcd\u751f\u6210 AI \u56fe\u7247\uff0c\u9700\u8981\u5148\u901a\u8fc7 SetConfig \u914d\u7f6e\u63a5\u53e3\u53c2\u6570")]
+    [Description("生成图片 - 根据提示词生成 AI 图片，需要先通过 SetConfig 配置接口参数")]
     public async Task GenerateImage(
-        [Description("\u56fe\u7247\u63cf\u8ff0\u63d0\u793a\u8bcd\uff0c\u82f1\u6587\u66f4\u4f73")] string prompt,
-        [Description("\u56fe\u7247\u5bbd\u5ea6\uff0c\u9ed8\u8ba4\u4f7f\u7528\u914d\u7f6e\u4e2d\u7684\u5c3a\u5bf8")] int? width = null,
-        [Description("\u56fe\u7247\u9ad8\u5ea6\uff0c\u9ed8\u8ba4\u4f7f\u7528\u914d\u7f6e\u4e2d\u7684\u5c3a\u5bf8")] int? height = null,
-        [Description("\u751f\u6210\u6570\u91cf\uff0c\u9ed8\u8ba4 1\uff0c\u6700\u5927 4")] int? n = null
+        [Description("图片描述提示词，英文更佳")] string prompt,
+        [Description("图片宽度，默认使用配置中的尺寸")] int? width = null,
+        [Description("图片高度，默认使用配置中的尺寸")] int? height = null,
+        [Description("生成数量，默认 1，最大 4")] int? n = null
     )
     {
         if (Configuration == null || string.IsNullOrWhiteSpace(Configuration.ApiKey))
         {
-            Poke("\u8bf7\u5148\u901a\u8fc7 SetConfig \u914d\u7f6e API \u53c2\u6570");
+            Poke("请先通过 SetConfig 配置 API 参数");
             return;
         }
 
         if (string.IsNullOrWhiteSpace(prompt))
         {
-            Poke("\u63d0\u793a\u8bcd\u4e0d\u80fd\u4e3a\u7a7a");
+            Poke("提示词不能为空");
             return;
         }
 
@@ -94,7 +98,7 @@ public class ImageGenModule(
 
         try
         {
-            logger.LogInformation("\u8bf7\u6c42\u56fe\u7247\u751f\u6210: {Endpoint} | {Prompt} | {W}x{H}",
+            logger.LogInformation("请求图片生成: {Endpoint} | {Prompt} | {W}x{H}",
                 Configuration.ApiEndpoint, prompt, w, h);
 
             var jsonContent = new StringContent(
@@ -108,14 +112,14 @@ public class ImageGenModule(
 
             if (!response.IsSuccessStatusCode)
             {
-                Poke($"API \u8bf7\u6c42\u5931\u8d25 ({response.StatusCode}): {body}");
+                Poke($"API 请求失败 ({response.StatusCode}): {body}");
                 return;
             }
 
             var result = JsonSerializer.Deserialize<ImageGenResult>(body, JsonOptions);
             if (result?.Data == null || result.Data.Count == 0)
             {
-                Poke("API \u8fd4\u56de\u4e86\u7a7a\u7684\u56fe\u7247\u6570\u636e");
+                Poke("API 返回了空的图片数据");
                 return;
             }
 
@@ -126,31 +130,33 @@ public class ImageGenModule(
 
             if (urls.Count == 0)
             {
-                Poke("API \u8fd4\u56de\u7684\u56fe\u7247 URL \u4e3a\u7a7a");
+                Poke("API 返回的图片 URL 为空");
                 return;
             }
 
-            var msg = $"\u2705 \u5df2\u751f\u6210 {urls.Count} \u5f20\u56fe\u7247";
+            var msg = $"✅ 已生成 {urls.Count} 张图片";
             var revised = result.Data.FirstOrDefault()?.RevisedPrompt;
             if (!string.IsNullOrEmpty(revised))
-                msg += $"\n> \u4f18\u5316\u63d0\u793a\u8bcd: {revised}";
-            var linkList = string.Join("\n", urls.Select((u, i) => $"\u56fe\u7247{i + 1}: {u}"));
-            msg += $"\n{linkList}";
+                msg += $"
+> 优化提示词: {revised}";
+            msg += $"
+{string.Join("
+", urls.Select((u, i) => $"[图片{i + 1}]({u})"))}";
 
             Poke(msg);
         }
         catch (TaskCanceledException)
         {
-            Poke("\u8bf7\u6c42\u8d85\u65f6\uff0c\u63a5\u53e3\u54cd\u5e94\u8f83\u6162\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u6216\u68c0\u67e5\u63a5\u53e3\u5730\u5740");
+            Poke("请求超时，接口响应较慢，请稍后重试或检查接口地址");
         }
         catch (HttpRequestException ex)
         {
-            Poke($"\u7f51\u7edc\u8bf7\u6c42\u5931\u8d25: {ex.Message}");
+            Poke($"网络请求失败: {ex.Message}");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "\u56fe\u7247\u751f\u6210\u5f02\u5e38");
-            Poke($"\u751f\u6210\u5931\u8d25: {ex.Message}");
+            logger.LogError(ex, "图片生成异常");
+            Poke($"生成失败: {ex.Message}");
         }
     }
 
@@ -163,9 +169,13 @@ public class ImageGenModule(
 
         var doc = xmlHandler.FunctionDocument();
         Prompt(
-            "\u6b64\u670d\u52a1\u652f\u6301 AI \u56fe\u7247\u751f\u6210\u529f\u80fd\u3002\n" +
-            "\u4f60\u53ef\u4ee5\u8ba9\u6211\u6839\u636e\u63cf\u8ff0\u751f\u6210\u56fe\u7247\uff0c\u4e5f\u53ef\u4ee5\u8ba9\u6211\u5e2e\u4f60\u914d\u7f6e API \u53c2\u6570\u3002\n\n" +
-            "## \u63d0\u4f9b\u5de5\u5177\n" + doc
+            "此服务支持 AI 图片生成功能。
+" +
+            "你可以让我根据描述生成图片，也可以让我帮你配置 API 参数。
+
+" +
+            "## 提供工具
+" + doc
         );
     }
 }
