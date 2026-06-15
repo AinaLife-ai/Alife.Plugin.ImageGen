@@ -49,11 +49,7 @@ public class ImageGenModule(
         if (width.HasValue) Configuration.DefaultWidth = width.Value;
         if (height.HasValue) Configuration.DefaultHeight = height.Value;
 
-        var msg = $"配置已更新
-  接口：{Configuration.ApiEndpoint}
-  Key：{(string.IsNullOrEmpty(Configuration.ApiKey) ? "未设置" : "已设置")}
-  模型：{Configuration.Model}
-  尺寸：{Configuration.DefaultWidth}x{Configuration.DefaultHeight}";
+        var msg = $"配置已更新\n  接口：{Configuration.ApiEndpoint}\n  Key：{(string.IsNullOrEmpty(Configuration.ApiKey) ? "未设置" : "已设置")}\n  模型：{Configuration.Model}\n  尺寸：{Configuration.DefaultWidth}x{Configuration.DefaultHeight}";
         Poke(msg);
         return Task.CompletedTask;
     }
@@ -137,11 +133,8 @@ public class ImageGenModule(
             var msg = $"✅ 已生成 {urls.Count} 张图片";
             var revised = result.Data.FirstOrDefault()?.RevisedPrompt;
             if (!string.IsNullOrEmpty(revised))
-                msg += $"
-> 优化提示词: {revised}";
-            msg += $"
-{string.Join("
-", urls.Select((u, i) => $"[图片{i + 1}]({u})"))}";
+                msg += $"\n> 优化提示词: {revised}";
+            msg += $"\n{string.Join("\n", urls.Select((u, i) => $"[图片{i + 1}]({u})"))}";
 
             Poke(msg);
         }
@@ -169,13 +162,9 @@ public class ImageGenModule(
 
         var doc = xmlHandler.FunctionDocument();
         Prompt(
-            "此服务支持 AI 图片生成功能。
-" +
-            "你可以让我根据描述生成图片，也可以让我帮你配置 API 参数。
-
-" +
-            "## 提供工具
-" + doc
+            "此服务支持 AI 图片生成功能。\n" +
+            "你可以让我根据描述生成图片，也可以让我帮你配置 API 参数。\n\n" +
+            "## 提供工具\n" + doc
         );
     }
 }
