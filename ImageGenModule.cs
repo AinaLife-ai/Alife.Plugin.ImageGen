@@ -1,8 +1,14 @@
+using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Tasks;
 using Alife.Framework;
 using Alife.Function.FunctionCaller;
 using Alife.Function.Interpreter;
@@ -23,7 +29,7 @@ public class ImageGenConfig
 public class ImageGenResult
 {
     public long Created { get; set; }
-    public List&lt;ImageData&gt; Data { get; set; } = [];
+    public List<ImageData> Data { get; set; } = [];
 }
 
 public class ImageData
@@ -40,8 +46,8 @@ public class ImageData
 )]
 public class ImageGenModule(
     XmlFunctionCaller functionService,
-    ILogger&lt;ImageGenModule&gt; logger
-) : InteractiveModule, IConfigurable&lt;ImageGenConfig&gt;
+    ILogger<ImageGenModule> logger
+) : InteractiveModule, IConfigurable<ImageGenConfig>
 {
     private static readonly JsonSerializerOptions JsonOpt = new()
     {
@@ -55,7 +61,6 @@ public class ImageGenModule(
     {
         await base.AwakeAsync(context);
 
-        // 如果框架没加载到配置，尝试从存储路径兜底加载
         if (Configuration == null)
             LoadPersistedConfig();
 
@@ -109,7 +114,7 @@ public class ImageGenModule(
             var path = Path.Combine(AlifePath.StorageFolderPath, $"{key}.json");
             if (!File.Exists(path)) return;
             var json = File.ReadAllText(path);
-            var loaded = System.Text.Json.JsonSerializer.Deserialize&lt;ImageGenConfig&gt;(json, new JsonSerializerOptions
+            var loaded = System.Text.Json.JsonSerializer.Deserialize<ImageGenConfig>(json, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true,
             });
@@ -139,7 +144,6 @@ public class ImageGenModule(
         if (width.HasValue) Configuration.DefaultWidth = width.Value;
         if (height.HasValue) Configuration.DefaultHeight = height.Value;
 
-        // 持久化到框架存储，重启后不丢失
         PersistConfig();
 
         Poke($"""
@@ -152,7 +156,7 @@ public class ImageGenModule(
         return Task.CompletedTask;
     }
 
-    [XmlFunction(FunctionMode.Pair)]
+    [XmlFunction(FunctionMode.OneShot)]
     [Description("生成图片 - 根据提示词生成 AI 图片，需先通过 SetConfig 配置接口参数")]
     public async Task GenerateImage(
         [Description("图片描述提示词，英文更佳")] string prompt,
@@ -163,13 +167,15 @@ public class ImageGenModule(
     {
         if (Configuration == null || string.IsNullOrWhiteSpace(Configuration.ApiKey))
         {
-            Error("请先通过 SetConfig 配置 API 参数");
+            logger.LogError("API未配置");
+            Poke("❌ 请先通过 SetConfig 配置 API 参数");
             return;
         }
 
         if (string.IsNullOrWhiteSpace(prompt))
         {
-            Error("提示词不能为空");
+            logger.LogError("提示词为空");
+            Poke("❌ 提示词不能为空");
             return;
         }
 
@@ -181,7 +187,7 @@ public class ImageGenModule(
         var h = height ?? Configuration.DefaultHeight;
         var count = Math.Clamp(n ?? 1, 1, 4);
 
-        var body = new Dictionary&lt;string, object&gt;
+        var body = new Dictionary<string, object>
         {
             ["prompt"] = prompt,
             ["n"] = count,
@@ -203,30 +209,32 @@ public class ImageGenModule(
 
             if (!resp.IsSuccessStatusCode)
             {
-                Error($"API 请求失败 ({resp.StatusCode}): {raw}");
+                logger.LogError("API请求失败: {StatusCode} {Raw}", resp.StatusCode, raw);
+                Poke($"❌ API 请求失败 ({resp.StatusCode})");
                 return;
             }
 
-            var result = JsonSerializer.Deserialize&lt;ImageGenResult&gt;(raw, JsonOpt);
+            var result = JsonSerializer.Deserialize<ImageGenResult>(raw, JsonOpt);
             if (result?.Data == null || result.Data.Count == 0)
             {
-                Error("API 返回为空");
+                logger.LogError("API返回为空");
+                Poke("❌ API 返回为空");
                 return;
             }
 
             var urls = result.Data
-                .Where(d =&gt; !string.IsNullOrEmpty(d.Url))
-                .Select(d =&gt; d.Url!)
+                .Where(d => !string.IsNullOrEmpty(d.Url))
+                .Select(d => d.Url!)
                 .ToList();
 
             if (urls.Count == 0)
             {
-                Error("图片 URL 为空");
+                logger.LogError("图片URL为空");
+                Poke("❌ 图片 URL 为空");
                 return;
             }
 
-            // 下载图片到本地
-            var saved = new List&lt;string&gt;();
+            var saved = new List<string>();
             foreach (var url in urls)
             {
                 try
@@ -247,32 +255,35 @@ public class ImageGenModule(
                 }
             }
 
-            if (saved.Count &gt; 0)
+            if (saved.Count > 0)
             {
                 var revised = result.Data.FirstOrDefault()?.RevisedPrompt;
                 var msg = $"已生成 {saved.Count} 张图片";
                 if (!string.IsNullOrEmpty(revised))
-                    msg += $"\n&gt; 优化描述: {revised}";
+                    msg += $"\n> 优化描述: {revised}";
                 msg += $"\n{string.Join("\n", saved)}";
                 Poke(msg);
             }
             else
             {
-                Error("图片生成成功但下载失败");
+                logger.LogWarning("图片生成成功但下载失败");
+                Poke("❌ 图片生成成功但下载失败");
             }
         }
         catch (TaskCanceledException)
         {
-            Error("请求超时，请检查接口地址或稍后重试");
+            logger.LogError("请求超时");
+            Poke("❌ 请求超时，请检查接口地址或稍后重试");
         }
         catch (HttpRequestException ex)
         {
-            Error($"网络请求失败: {ex.Message}");
+            logger.LogError(ex, "网络请求失败");
+            Poke($"❌ 网络请求失败: {ex.Message}");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "生成图片异常");
-            Error($"生成失败: {ex.Message}");
+            logger.LogError(ex, "生成异常");
+            Poke($"❌ 生成失败: {ex.Message}");
         }
     }
 }
