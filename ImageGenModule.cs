@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -21,7 +22,7 @@ namespace Alife.Plugin.ImageGen;
 public class ImageGenModule(
     XmlFunctionCaller functionService,
     ILogger<ImageGenModule> logger
-) : InteractiveModule, IConfigurable
+) : InteractiveModule, IConfigurable<ImageGenConfig>
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
