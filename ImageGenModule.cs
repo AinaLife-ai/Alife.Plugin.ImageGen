@@ -12,13 +12,11 @@ namespace Alife.Plugin.ImageGen;
 
 [Module(
     "AI 图片生成",
-    "AI 图片生成功能，支持自定义接口地址、API Key、模型和尺寸。兼容 OpenAI 格式接口及 Stable Diffusion API。",
-    EditorUI = typeof(ImageGenModuleUI)
+    "AI 图片生成功能，支持自定义接口地址、API Key、模型和尺寸。兼容 OpenAI 格式接口及 Stable Diffusion API。"
 )]
 public class ImageGenModule(
     XmlFunctionCaller functionService,
-    ILogger<ImageGenModule> logger,
-    IHttpClientFactory httpClientFactory
+    ILogger<ImageGenModule> logger
 ) : InteractiveModule, IConfigurable
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -29,24 +27,47 @@ public class ImageGenModule(
 
     public ImageGenConfig? Configuration { get; set; }
 
-    [XmlFunction(FunctionMode.Pair)]
-    [Description("生成图片 - 根据提示词生成一张AI图片")]
-    public async Task GenerateImage(
-        [Description("图片描述提示词（英文更佳）")] string prompt,
-        [Description("图片宽度（可选，默认使用管理界面设置）")] int? width = null,
-        [Description("图片高度（可选，默认使用管理界面设置）")] int? height = null,
-        [Description("生成数量，默认1，最大4")] int? n = null
+    [XmlFunction(FunctionMode.OneShot)]
+    [Description("配置图片生成参数 - 设置 API 接口地址、Key、模型和默认尺寸")]
+    public Task SetConfig(
+        [Description("API 接口地址，如 https://api.openai.com/v1/images/generations")] string? endpoint = null,
+        [Description("API Key")] string? apiKey = null,
+        [Description("模型名称，如 dall-e-3、stable-diffusion-xl-1024-v1-0")] string? model = null,
+        [Description("默认宽度，如 1024")] int? width = null,
+        [Description("默认高度，如 1024")] int? height = null
     )
     {
         if (Configuration == null)
-        {
-            Error("插件未配置，请先在管理界面设置 API 参数");
-            return;
-        }
+            Configuration = new ImageGenConfig();
 
-        if (string.IsNullOrWhiteSpace(Configuration.ApiKey))
+        if (!string.IsNullOrEmpty(endpoint)) Configuration.ApiEndpoint = endpoint;
+        if (!string.IsNullOrEmpty(apiKey)) Configuration.ApiKey = apiKey;
+        if (!string.IsNullOrEmpty(model)) Configuration.Model = model;
+        if (width.HasValue) Configuration.DefaultWidth = width.Value;
+        if (height.HasValue) Configuration.DefaultHeight = height.Value;
+
+        var msg = "配置已更新：\n" +
+                  $"  接口：{Configuration.ApiEndpoint}\n" +
+                  $"  Key：{(string.IsNullOrEmpty(Configuration.ApiKey) ? "未设置" : "已设置")}\n" +
+                  $"  模型：{Configuration.Model}\n" +
+                  $"  尺寸：{Configuration.DefaultWidth}x{Configuration.DefaultHeight}";
+
+        Poke(msg);
+        return Task.CompletedTask;
+    }
+
+    [XmlFunction(FunctionMode.Pair)]
+    [Description("生成图片 - 根据提示词生成 AI 图片")]
+    public async Task GenerateImage(
+        [Description("图片描述提示词，英文更佳")] string prompt,
+        [Description("图片宽度，默认使用配置中的尺寸")] int? width = null,
+        [Description("图片高度，默认使用配置中的尺寸")] int? height = null,
+        [Description("生成数量，默认 1，最大 4")] int? n = null
+    )
+    {
+        if (Configuration == null || string.IsNullOrWhiteSpace(Configuration.ApiKey))
         {
-            Error("API Key 未配置，请先在管理界面填写");
+            Error("请先通过 SetConfig 配置 API 参数");
             return;
         }
 
@@ -56,15 +77,14 @@ public class ImageGenModule(
             return;
         }
 
-        var httpClient = httpClientFactory.CreateClient("ImageGen");
-        httpClient.Timeout = TimeSpan.FromSeconds(120);
-        httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Configuration.ApiKey);
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
+        httpClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", Configuration.ApiKey);
 
         var w = width ?? Configuration.DefaultWidth;
         var h = height ?? Configuration.DefaultHeight;
         var count = Math.Clamp(n ?? 1, 1, 4);
 
-        // 构建请求体 — 兼容 OpenAI Image API / SD API
         var requestBody = new Dictionary<string, object>
         {
             ["prompt"] = prompt,
@@ -76,7 +96,7 @@ public class ImageGenModule(
 
         try
         {
-            logger.LogInformation("正在请求图片生成 API: {Endpoint}, prompt={Prompt}, size={W}x{H}",
+            logger.LogInformation("请求图片生成: {Endpoint} | {Prompt} | {W}x{H}",
                 Configuration.ApiEndpoint, prompt, w, h);
 
             var jsonContent = new StringContent(
@@ -86,15 +106,15 @@ public class ImageGenModule(
             );
 
             var response = await httpClient.PostAsync(Configuration.ApiEndpoint, jsonContent);
-            var responseBody = await response.Content.ReadAsStringAsync();
+            var body = await response.Content.ReadAsStringAsync();
 
             if (!response.IsSuccessStatusCode)
             {
-                Error($"API 请求失败 ({response.StatusCode}): {responseBody}");
+                Error($"API 请求失败 ({response.StatusCode}): {body}");
                 return;
             }
 
-            var result = JsonSerializer.Deserialize<ImageGenResult>(responseBody, JsonOptions);
+            var result = JsonSerializer.Deserialize<ImageGenResult>(body, JsonOptions);
             if (result?.Data == null || result.Data.Count == 0)
             {
                 Error("API 返回了空的图片数据");
@@ -112,46 +132,39 @@ public class ImageGenModule(
                 return;
             }
 
-            // 下载图片并发送给 AI 上下文
-            var imageUrls = new List<string>();
+            var downloadedUrls = new List<string>();
             foreach (var url in urls)
             {
                 try
                 {
                     var imgBytes = await httpClient.GetByteArrayAsync(url);
-                    // 保存到临时目录供显示
-                    var fileName = $"imagegen_{DateTime.Now:yyyyMMddHHmmss}_{Guid.NewGuid():N}.png";
-                    var savePath = Path.Combine(Path.GetTempPath(), "Alife_ImageGen", fileName);
-                    Directory.CreateDirectory(Path.GetDirectoryName(savePath)!);
-                    await File.WriteAllBytesAsync(savePath, imgBytes);
-                    imageUrls.Add(url);
-
-                    logger.LogInformation("图片已保存: {Path}", savePath);
+                    downloadedUrls.Add(url);
+                    logger.LogInformation("图片已下载: {Url}", url);
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning("下载图片失败 {Url}: {Msg}", url, ex.Message);
+                    logger.LogWarning("下载图片失败: {Msg}", ex.Message);
                 }
             }
 
-            if (imageUrls.Count > 0)
+            if (downloadedUrls.Count > 0)
             {
                 var revised = result.Data.FirstOrDefault()?.RevisedPrompt;
-                var msg = $"\u2705 已生成 {imageUrls.Count} 张图片";
+                var msg = $"\u2705 已生成 {downloadedUrls.Count} 张图片";
                 if (!string.IsNullOrEmpty(revised))
-                    msg += $"\n> {revised}";
-                msg += $"\n{string.Join("\n", imageUrls.Select((u, i) => $"[图片{i + 1}]({u})"))}";
+                    msg += $"\n> 优化提示词: {revised}";
+                msg += $"\n{string.Join("\n", downloadedUrls.Select((u, i) => $"[图片{i + 1}]({u})"))}";
 
                 Poke(msg);
             }
             else
             {
-                Error("图片生成成功但下载失败，请检查网络或更换接口");
+                Error("图片生成成功但下载失败");
             }
         }
         catch (TaskCanceledException)
         {
-            Error("图片生成请求超时，可能是接口响应较慢，请稍后重试");
+            Error("请求超时，接口响应较慢，请稍后重试或检查接口地址");
         }
         catch (HttpRequestException ex)
         {
@@ -159,8 +172,8 @@ public class ImageGenModule(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "图片生成失败");
-            Error($"图片生成失败: {ex.Message}");
+            logger.LogError(ex, "图片生成异常");
+            Error($"生成失败: {ex.Message}");
         }
     }
 
@@ -171,12 +184,34 @@ public class ImageGenModule(
         var xmlHandler = new XmlHandler(this);
         functionService.RegisterHandlerWithoutDocument(xmlHandler);
 
-        Prompt($"""
+        Prompt($$"""
         此服务支持 AI 图片生成功能。
-        你可以让我根据描述生成图片。
+        你可以让我根据描述生成图片，也可以让我帮你配置 API 参数。
 
         ## 提供工具
-        {xmlHandler.FunctionDocument()}
+        {{xmlHandler.FunctionDocument()}}
         """);
     }
+}
+
+public class ImageGenConfig
+{
+    public string ApiEndpoint { get; set; } = "https://api.openai.com/v1/images/generations";
+    public string ApiKey { get; set; } = "";
+    public string Model { get; set; } = "dall-e-3";
+    public int DefaultWidth { get; set; } = 1024;
+    public int DefaultHeight { get; set; } = 1024;
+}
+
+public class ImageGenResult
+{
+    public long Created { get; set; }
+    public List<ImageData> Data { get; set; } = new();
+}
+
+public class ImageData
+{
+    public string? Url { get; set; }
+    public string? B64Json { get; set; }
+    public string? RevisedPrompt { get; set; }
 }
