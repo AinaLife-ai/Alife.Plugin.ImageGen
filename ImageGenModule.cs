@@ -47,7 +47,7 @@ public class ImageData
 public class ImageGenModule(
     XmlFunctionCaller functionService,
     ILogger<ImageGenModule> logger
-) : InteractiveModule, IConfigurable<ImageGenConfig>
+) : InteractiveModule<ImageGenModule>, IConfigurable<ImageGenConfig>
 {
     private static readonly JsonSerializerOptions JsonOpt = new()
     {
@@ -168,14 +168,14 @@ public class ImageGenModule(
         if (Configuration == null || string.IsNullOrWhiteSpace(Configuration.ApiKey))
         {
             logger.LogError("API未配置");
-            Poke("❌ 请先通过 SetConfig 配置 API 参数");
+            Poke("请先通过 SetConfig 配置 API 参数");
             return;
         }
 
         if (string.IsNullOrWhiteSpace(prompt))
         {
             logger.LogError("提示词为空");
-            Poke("❌ 提示词不能为空");
+            Poke("提示词不能为空");
             return;
         }
 
@@ -209,8 +209,8 @@ public class ImageGenModule(
 
             if (!resp.IsSuccessStatusCode)
             {
-                logger.LogError("API请求失败: {StatusCode} {Raw}", resp.StatusCode, raw);
-                Poke($"❌ API 请求失败 ({resp.StatusCode})");
+                logger.LogError("API请求失败: {StatusCode}", resp.StatusCode);
+                Poke($"API 请求失败 ({resp.StatusCode})");
                 return;
             }
 
@@ -218,7 +218,7 @@ public class ImageGenModule(
             if (result?.Data == null || result.Data.Count == 0)
             {
                 logger.LogError("API返回为空");
-                Poke("❌ API 返回为空");
+                Poke("API 返回为空");
                 return;
             }
 
@@ -230,7 +230,7 @@ public class ImageGenModule(
             if (urls.Count == 0)
             {
                 logger.LogError("图片URL为空");
-                Poke("❌ 图片 URL 为空");
+                Poke("图片 URL 为空");
                 return;
             }
 
@@ -267,23 +267,23 @@ public class ImageGenModule(
             else
             {
                 logger.LogWarning("图片生成成功但下载失败");
-                Poke("❌ 图片生成成功但下载失败");
+                Poke("图片生成成功但下载失败");
             }
         }
         catch (TaskCanceledException)
         {
             logger.LogError("请求超时");
-            Poke("❌ 请求超时，请检查接口地址或稍后重试");
+            Poke("请求超时，请检查接口地址或稍后重试");
         }
         catch (HttpRequestException ex)
         {
             logger.LogError(ex, "网络请求失败");
-            Poke($"❌ 网络请求失败: {ex.Message}");
+            Poke($"网络请求失败: {ex.Message}");
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "生成异常");
-            Poke($"❌ 生成失败: {ex.Message}");
+            Poke($"生成失败: {ex.Message}");
         }
     }
 }
