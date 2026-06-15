@@ -1,4 +1,8 @@
+using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -56,7 +60,7 @@ public class ImageGenModule(
         return Task.CompletedTask;
     }
 
-    [XmlFunction(FunctionMode.Pair)]
+    [XmlFunction(FunctionMode.OneShot)]
     [Description("生成图片 - 根据提示词生成 AI 图片")]
     public async Task GenerateImage(
         [Description("图片描述提示词，英文更佳")] string prompt,
@@ -137,7 +141,7 @@ public class ImageGenModule(
             {
                 try
                 {
-                    var imgBytes = await httpClient.GetByteArrayAsync(url);
+                    await httpClient.GetByteArrayAsync(url);
                     downloadedUrls.Add(url);
                     logger.LogInformation("图片已下载: {Url}", url);
                 }
