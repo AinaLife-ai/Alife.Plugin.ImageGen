@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
-using System.Threading.Tasks;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Tasks;
 using Alife.Framework;
 using Alife.Function.FunctionCaller;
 using Alife.Function.Interpreter;
@@ -22,7 +22,7 @@ namespace Alife.Plugin.ImageGen;
 public class ImageGenModule(
     XmlFunctionCaller functionService,
     ILogger<ImageGenModule> logger
-) : InteractiveModule, IConfigurable<ImageGenConfig>
+) : InteractiveModule<ImageGenModule>, IConfigurable<ImageGenConfig>
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -42,27 +42,24 @@ public class ImageGenModule(
         [Description("默认高度，如 1024")] int? height = null
     )
     {
-        if (Configuration == null)
-            Configuration = new ImageGenConfig();
-
+        Configuration ??= new ImageGenConfig();
         if (!string.IsNullOrEmpty(endpoint)) Configuration.ApiEndpoint = endpoint;
         if (!string.IsNullOrEmpty(apiKey)) Configuration.ApiKey = apiKey;
         if (!string.IsNullOrEmpty(model)) Configuration.Model = model;
         if (width.HasValue) Configuration.DefaultWidth = width.Value;
         if (height.HasValue) Configuration.DefaultHeight = height.Value;
 
-        var msg = "配置已更新：\n" +
-                  $"  接口：{Configuration.ApiEndpoint}\n" +
-                  $"  Key：{(string.IsNullOrEmpty(Configuration.ApiKey) ? "未设置" : "已设置")}\n" +
-                  $"  模型：{Configuration.Model}\n" +
-                  $"  尺寸：{Configuration.DefaultWidth}x{Configuration.DefaultHeight}";
-
+        var msg = $"配置已更新
+  接口：{Configuration.ApiEndpoint}
+  Key：{(string.IsNullOrEmpty(Configuration.ApiKey) ? "未设置" : "已设置")}
+  模型：{Configuration.Model}
+  尺寸：{Configuration.DefaultWidth}x{Configuration.DefaultHeight}";
         Poke(msg);
         return Task.CompletedTask;
     }
 
     [XmlFunction(FunctionMode.OneShot)]
-    [Description("生成图片 - 根据提示词生成 AI 图片")]
+    [Description("生成图片 - 根据提示词生成 AI 图片，需要先通过 SetConfig 配置接口参数")]
     public async Task GenerateImage(
         [Description("图片描述提示词，英文更佳")] string prompt,
         [Description("图片宽度，默认使用配置中的尺寸")] int? width = null,
@@ -72,13 +69,13 @@ public class ImageGenModule(
     {
         if (Configuration == null || string.IsNullOrWhiteSpace(Configuration.ApiKey))
         {
-            Error("请先通过 SetConfig 配置 API 参数");
+            Poke("请先通过 SetConfig 配置 API 参数");
             return;
         }
 
         if (string.IsNullOrWhiteSpace(prompt))
         {
-            Error("提示词不能为空");
+            Poke("提示词不能为空");
             return;
         }
 
@@ -115,14 +112,14 @@ public class ImageGenModule(
 
             if (!response.IsSuccessStatusCode)
             {
-                Error($"API 请求失败 ({response.StatusCode}): {body}");
+                Poke($"API 请求失败 ({response.StatusCode}): {body}");
                 return;
             }
 
             var result = JsonSerializer.Deserialize<ImageGenResult>(body, JsonOptions);
             if (result?.Data == null || result.Data.Count == 0)
             {
-                Error("API 返回了空的图片数据");
+                Poke("API 返回了空的图片数据");
                 return;
             }
 
@@ -133,52 +130,33 @@ public class ImageGenModule(
 
             if (urls.Count == 0)
             {
-                Error("API 返回的图片 URL 为空");
+                Poke("API 返回的图片 URL 为空");
                 return;
             }
 
-            var downloadedUrls = new List<string>();
-            foreach (var url in urls)
-            {
-                try
-                {
-                    await httpClient.GetByteArrayAsync(url);
-                    downloadedUrls.Add(url);
-                    logger.LogInformation("图片已下载: {Url}", url);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning("下载图片失败: {Msg}", ex.Message);
-                }
-            }
+            var msg = $"✅ 已生成 {urls.Count} 张图片";
+            var revised = result.Data.FirstOrDefault()?.RevisedPrompt;
+            if (!string.IsNullOrEmpty(revised))
+                msg += $"
+> 优化提示词: {revised}";
+            msg += $"
+{string.Join("
+", urls.Select((u, i) => $"[图片{i + 1}]({u})"))}";
 
-            if (downloadedUrls.Count > 0)
-            {
-                var revised = result.Data.FirstOrDefault()?.RevisedPrompt;
-                var msg = $"\u2705 已生成 {downloadedUrls.Count} 张图片";
-                if (!string.IsNullOrEmpty(revised))
-                    msg += $"\n> 优化提示词: {revised}";
-                msg += $"\n{string.Join("\n", downloadedUrls.Select((u, i) => $"[图片{i + 1}]({u})"))}";
-
-                Poke(msg);
-            }
-            else
-            {
-                Error("图片生成成功但下载失败");
-            }
+            Poke(msg);
         }
         catch (TaskCanceledException)
         {
-            Error("请求超时，接口响应较慢，请稍后重试或检查接口地址");
+            Poke("请求超时，接口响应较慢，请稍后重试或检查接口地址");
         }
         catch (HttpRequestException ex)
         {
-            Error($"网络请求失败: {ex.Message}");
+            Poke($"网络请求失败: {ex.Message}");
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "图片生成异常");
-            Error($"生成失败: {ex.Message}");
+            Poke($"生成失败: {ex.Message}");
         }
     }
 
@@ -189,13 +167,16 @@ public class ImageGenModule(
         var xmlHandler = new XmlHandler(this);
         functionService.RegisterHandlerWithoutDocument(xmlHandler);
 
-        Prompt($$"""
-        此服务支持 AI 图片生成功能。
-        你可以让我根据描述生成图片，也可以让我帮你配置 API 参数。
+        var doc = xmlHandler.FunctionDocument();
+        Prompt(
+            "此服务支持 AI 图片生成功能。
+" +
+            "你可以让我根据描述生成图片，也可以让我帮你配置 API 参数。
 
-        ## 提供工具
-        {{xmlHandler.FunctionDocument()}}
-        """);
+" +
+            "## 提供工具
+" + doc
+        );
     }
 }
 
