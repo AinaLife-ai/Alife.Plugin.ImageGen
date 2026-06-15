@@ -234,12 +234,15 @@ public class ImageGenModule(
                 return;
             }
 
+            // Use a separate client without auth header for downloading
+            using var downloadHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+
             var saved = new List<string>();
             foreach (var url in urls)
             {
                 try
                 {
-                    var img = await http.GetByteArrayAsync(url);
+                    var img = await downloadHttp.GetByteArrayAsync(url);
                     var dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
                         "Data", "ImageGen");
                     Directory.CreateDirectory(dir);
