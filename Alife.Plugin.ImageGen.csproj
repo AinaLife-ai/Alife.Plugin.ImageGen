@@ -1,18 +1,18 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RootNamespace>Alife.Plugin.ImageGen</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\sources\Alife\Alife.csproj" />
-    <ProjectReference Include="..\..\sources\Alife.DeskPet\Alife.DeskPet.csproj" />
+    <ProjectReference Include="..\..\Sources\Alife\Alife.Framework\Alife.Framework.csproj" />
+    <ProjectReference Include="..\..\Sources\Alife.Function\Alife.Function.FunctionCaller\Alife.Function.FunctionCaller.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.4" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="9.0.0" />
   </ItemGroup>
 
 </Project>
